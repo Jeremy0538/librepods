@@ -138,6 +138,7 @@ struct Controller {
     adapter: Adapter,
     policy: SwitchPolicy,
     enabled: bool,
+    primed: bool,
     /// Paused when the AirPods left; Move back resumes them, which reconnects.
     handed_over_players: Vec<String>,
     move_back_tx: mpsc::UnboundedSender<()>,
@@ -167,8 +168,8 @@ impl Controller {
         if enabled != self.enabled {
             info!("Multi-device switching {}", if enabled { "enabled" } else { "disabled" });
             self.enabled = enabled;
-            // Fresh state, so whatever is playing right now doesn't count as just started.
             self.policy = SwitchPolicy::default();
+            self.primed = false;
         }
         if !enabled {
             return;
@@ -177,6 +178,13 @@ impl Controller {
             return;
         };
         let o = self.observe(address).await;
+        if !self.primed {
+            // The first observation only sets the baseline: whatever is already playing (Vesktop
+            // and games hold uncorked streams all the time) doesn't count as just started.
+            self.policy.update(&o);
+            self.primed = true;
+            return;
+        }
         let decision = self.policy.update(&o);
         match decision.action {
             Action::None => {
@@ -261,6 +269,7 @@ pub async fn run(adapter: Adapter) {
         adapter,
         policy: SwitchPolicy::default(),
         enabled: false,
+        primed: false,
         handed_over_players: Vec::new(),
         move_back_tx,
     };
