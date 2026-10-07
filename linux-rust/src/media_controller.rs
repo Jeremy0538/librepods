@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 #[derive(Clone, Debug)]
 struct OwnedCardProfileInfo {
     name: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -568,6 +569,15 @@ impl MediaController {
             return cached_profile;
         }
 
+        // AirPods negotiate AAC on connect and it is their native codec; picking SBC-XQ makes
+        // PipeWire renegotiate the stream, which keeps the sink away for ~3 s on every connect.
+        // The bare a2dp-sink name carries no codec, so AAC is only found through the description.
+        if let Some(profile) = Self::aac_profile(index).await {
+            info!("Selected AAC A2DP profile: {}", profile);
+            self.state.lock().await.cached_a2dp_profile = profile.clone();
+            return profile;
+        }
+
         for profile in ["a2dp-sink-sbc_xq", "a2dp-sink-sbc", "a2dp-sink"] {
             if self.is_profile_available(index, profile).await {
                 info!("Selected best available A2DP profile: {}", profile);
@@ -577,6 +587,24 @@ impl MediaController {
         }
         debug!("No suitable profile found");
         String::new()
+    }
+
+    async fn aac_profile(card_index: u32) -> Option<String> {
+        tokio::task::spawn_blocking(move || {
+            get_card_info_list_sync()
+                .into_iter()
+                .find(|c| c.index == card_index)?
+                .profiles
+                .into_iter()
+                .find(|p| {
+                    p.name.as_deref().is_some_and(|n| n.starts_with("a2dp-sink"))
+                        && p.description.as_deref().is_some_and(is_aac_description)
+                })?
+                .name
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     async fn is_profile_available(&self, card_index: u32, profile: &str) -> bool {
@@ -889,6 +917,11 @@ impl MediaController {
 
 // --- PulseAudio helpers ---
 
+// PipeWire describes A2DP profiles as "High Fidelity Playback (A2DP Sink, codec AAC)".
+fn is_aac_description(description: &str) -> bool {
+    description.contains("codec AAC")
+}
+
 fn pulse_connect() -> Option<(Mainloop, Context)> {
     let mut mainloop = Mainloop::new()?;
     let mut context = Context::new(&mainloop, "LibrePods")?;
@@ -922,6 +955,7 @@ fn get_card_info_list_sync() -> Vec<OwnedCardInfo> {
                     .iter()
                     .map(|p| OwnedCardProfileInfo {
                         name: p.name.as_ref().map(|n| n.to_string()),
+                        description: p.description.as_ref().map(|d| d.to_string()),
                     })
                     .collect();
                 cards.borrow_mut().push(OwnedCardInfo {
@@ -1083,4 +1117,16 @@ async fn get_sink_name_by_mac(mac: &str) -> Option<String> {
     })
         .await
         .unwrap_or(None)
+}
+#[cfg(test)]
+mod tests {
+    use super::is_aac_description;
+
+    #[test]
+    fn aac_description() {
+        assert!(is_aac_description("High Fidelity Playback (A2DP Sink, codec AAC)"));
+        assert!(!is_aac_description("High Fidelity Playback (A2DP Sink, codec SBC-XQ)"));
+        assert!(!is_aac_description("High Fidelity Playback (A2DP Sink, codec SBC)"));
+        assert!(!is_aac_description("Headset Head Unit (HSP/HFP, codec mSBC)"));
+    }
 }
