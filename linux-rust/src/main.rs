@@ -162,6 +162,7 @@ async fn async_main(
         }
     });
 
+    tokio::spawn(multidevice::run(adapter.clone()));
     info!("Listening for new connections.");
 
     info!("Checking for connected devices...");

@@ -4,7 +4,7 @@ use dbus::arg::RefArg;
 use dbus::blocking::Connection;
 use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
 use libpulse_binding::callbacks::ListResult;
-use libpulse_binding::context::introspect::SinkInfo;
+use libpulse_binding::context::introspect::{SinkInfo, SinkInputInfo};
 use libpulse_binding::context::{Context, FlagSet as ContextFlagSet};
 use libpulse_binding::def::Retval;
 use libpulse_binding::mainloop::standard::Mainloop;
@@ -893,7 +893,7 @@ impl MediaController {
         }
     }
 
-    fn list_mpris_services(conn: &Connection) -> Vec<String> {
+    pub(crate) fn list_mpris_services(conn: &Connection) -> Vec<String> {
         let proxy = conn.with_proxy(
             "org.freedesktop.DBus",
             "/org/freedesktop/DBus",
@@ -913,6 +913,78 @@ impl MediaController {
             })
             .collect()
     }
+}
+
+// --- Used by multi-device switching (blocking; call from spawn_blocking) ---
+
+/// MPRIS players reporting Playing (KDE Connect's phone players excluded).
+pub(crate) fn playing_players_sync() -> Vec<String> {
+    let Ok(conn) = Connection::new_session() else {
+        return vec![];
+    };
+    MediaController::list_mpris_services(&conn)
+        .into_iter()
+        .filter(|service| {
+            conn.with_proxy(service.as_str(), "/org/mpris/MediaPlayer2", Duration::from_secs(2))
+                .get::<String>("org.mpris.MediaPlayer2.Player", "PlaybackStatus")
+                .is_ok_and(|s| s == "Playing")
+        })
+        .collect()
+}
+
+/// Calls Play or Pause on one MPRIS player.
+pub(crate) fn mpris_call_sync(service: &str, method: &str) -> bool {
+    let Ok(conn) = Connection::new_session() else {
+        return false;
+    };
+    conn.with_proxy(service, "/org/mpris/MediaPlayer2", Duration::from_secs(2))
+        .method_call::<(), _, _, _>("org.mpris.MediaPlayer2.Player", method, ())
+        .is_ok()
+}
+
+pub(crate) fn sink_names_sync() -> Vec<String> {
+    let Some((mut mainloop, context)) = pulse_connect() else {
+        return vec![];
+    };
+    let names: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let op = context.introspect().get_sink_info_list({
+        let names = names.clone();
+        move |result: ListResult<&SinkInfo>| {
+            if let ListResult::Item(item) = result
+                && let Some(name) = item.name.as_ref()
+            {
+                names.borrow_mut().push(name.to_string());
+            }
+        }
+    });
+    while op.get_state() == OperationState::Running {
+        mainloop.iterate(false);
+    }
+    mainloop.quit(Retval(0));
+    Rc::try_unwrap(names).map(RefCell::into_inner).unwrap_or_default()
+}
+
+/// Whether any playback stream is uncorked, which is what an app playing sound holds.
+pub(crate) fn any_stream_playing_sync() -> bool {
+    let Some((mut mainloop, context)) = pulse_connect() else {
+        return false;
+    };
+    let playing = Rc::new(RefCell::new(false));
+    let op = context.introspect().get_sink_input_info_list({
+        let playing = playing.clone();
+        move |result: ListResult<&SinkInputInfo>| {
+            if let ListResult::Item(item) = result
+                && !item.corked
+            {
+                *playing.borrow_mut() = true;
+            }
+        }
+    });
+    while op.get_state() == OperationState::Running {
+        mainloop.iterate(false);
+    }
+    mainloop.quit(Retval(0));
+    *playing.borrow()
 }
 
 // --- PulseAudio helpers ---

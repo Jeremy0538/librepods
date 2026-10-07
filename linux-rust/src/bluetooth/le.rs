@@ -148,6 +148,7 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                     while let Some(ev) = events.next().await {
                         match ev {
                             bluer::DeviceEvent::PropertyChanged(prop) => {
+                                crate::multidevice::report_seen();
                                 if let bluer::DeviceProperty::ManufacturerData(data) = prop {
                                     if let Some(enc_key) = &matched_enc_key
                                         && let Some(apple_data) = data.get(&76)
@@ -185,7 +186,9 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                                 matched_airpods_mac.as_ref().unwrap(),
                                                 auto_connect
                                             );
-                                            if auto_connect {
+                                            // Multi-device switching decides when to connect;
+                                            // this would pull them back right after a release.
+                                            if auto_connect && !crate::utils::multi_device_enabled() {
                                                 let real_address =
                                                     Address::from_str(&addr_str).unwrap();
                                                 let mut cm = connecting_macs_clone.lock().await;
@@ -292,6 +295,12 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                         } else {
                                             (case_byte & 0x7F, (case_byte & 0x80) != 0)
                                         };
+                                        crate::multidevice::report_buds(crate::multidevice::policy::buds_from(
+                                            left_byte != 0xff,
+                                            left_charging,
+                                            right_byte != 0xff,
+                                            right_charging,
+                                        ));
 
                                         if let Some(handle) = &tray_handle_clone {
                                             handle

@@ -251,6 +251,23 @@ impl AirPodsDevice {
                     }
                     AACPEvent::BatteryInfo(battery_info) => {
                         debug!("Received BatteryInfo event: {:?}", battery_info);
+                        {
+                            use crate::bluetooth::aacp::BatteryStatus;
+                            // 0x04 = left, 0x02 = right (as the tray mapping below)
+                            let bud = |component: u8| {
+                                battery_info
+                                    .iter()
+                                    .find(|b| b.component as u8 == component && b.status != BatteryStatus::Disconnected)
+                                    .map(|b| b.status == BatteryStatus::Charging)
+                            };
+                            let (left, right) = (bud(0x04), bud(0x02));
+                            crate::multidevice::report_buds(crate::multidevice::policy::buds_from(
+                                left.is_some(),
+                                left.unwrap_or(false),
+                                right.is_some(),
+                                right.unwrap_or(false),
+                            ));
+                        }
                         if let Some(handle) = &tray_handle {
                             handle
                                 .update(|tray: &mut MyTray| {

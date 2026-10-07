@@ -23,6 +23,16 @@ pub fn get_preferences_path() -> PathBuf {
 
 /// `pause_on_single_bud_removal` in app_settings.json (default true). Read on
 /// every ear-detection event so a change applies without a restart.
+/// `multi_device` in app_settings.json (default false): the AirPods follow whichever device
+/// is playing (see multidevice). Read every second so the AirPods panel toggle applies at once.
+pub fn multi_device_enabled() -> bool {
+    std::fs::read_to_string(get_app_settings_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("multi_device").and_then(|b| b.as_bool()))
+        .unwrap_or(false)
+}
+
 pub fn pause_on_single_bud_removal() -> bool {
     std::fs::read_to_string(get_app_settings_path())
         .ok()
