@@ -284,9 +284,13 @@ impl MediaController {
                 self.resume().await;
                 self.state.lock().await.i_paused_the_media = false;
             } else if !old_all_out {
-                debug!("Pausing media as buds are not fully in ear");
-                self.pause().await;
-                self.state.lock().await.i_paused_the_media = true;
+                if new_has_at_least_one_in && !crate::utils::pause_on_single_bud_removal() {
+                    debug!("One bud out, pause_on_single_bud_removal is off: not pausing");
+                } else {
+                    debug!("Pausing media as buds are not fully in ear");
+                    self.pause().await;
+                    self.state.lock().await.i_paused_the_media = true;
+                }
             } else {
                 debug!("Playing media");
                 self.resume().await;

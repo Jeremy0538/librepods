@@ -21,6 +21,16 @@ pub fn get_preferences_path() -> PathBuf {
         .join("preferences.json")
 }
 
+/// `pause_on_single_bud_removal` in app_settings.json (default true). Read on
+/// every ear-detection event so a change applies without a restart.
+pub fn pause_on_single_bud_removal() -> bool {
+    std::fs::read_to_string(get_app_settings_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("pause_on_single_bud_removal").and_then(|b| b.as_bool()))
+        .unwrap_or(true)
+}
+
 pub fn get_app_settings_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
 
