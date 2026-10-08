@@ -308,7 +308,7 @@ pub enum AACPEvent {
     StemPress(StemPressType, StemPressBudType),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AirPodsLEKeys {
     pub irk: String,
     pub enc_key: String,
@@ -713,10 +713,16 @@ impl AACPManager {
                         enc_key: "".to_string(),
                     },
                 };
+                let mut info = info;
                 let mut state = self.state.lock().await;
                 if let Some(mac) = state.airpods_mac
                     && let Some(device_data) = state.devices.get_mut(&mac.to_string())
                 {
+                    // The proximity keys arrive in their own packet, often before this one:
+                    // keep them instead of wiping them on every connect.
+                    if let Some(DeviceInformation::AirPods(old)) = &device_data.information {
+                        info.le_keys = old.le_keys.clone();
+                    }
                     device_data.name = info.name.clone();
                     device_data.information = Some(DeviceInformation::AirPods(info.clone()));
                 }
@@ -785,25 +791,19 @@ impl AACPManager {
                                 type_: DeviceType::AirPods,
                                 information: None,
                             });
+                        // Keys can arrive before the Information packet; start the record then.
+                        if device_data.information.is_none() {
+                            device_data.information =
+                                Some(DeviceInformation::AirPods(Default::default()));
+                        }
+                        let Some(DeviceInformation::AirPods(info)) = device_data.information.as_mut()
+                        else {
+                            error!("Device information is not AirPods for adding LE keys.");
+                            continue;
+                        };
                         match kt {
-                            ProximityKeyType::Irk => match device_data.information.as_mut() {
-                                Some(DeviceInformation::AirPods(info)) => {
-                                    info.le_keys.irk = hex::encode(key_data);
-                                }
-                                _ => {
-                                    error!("Device information is not AirPods for adding LE IRK.");
-                                }
-                            },
-                            ProximityKeyType::EncKey => match device_data.information.as_mut() {
-                                Some(DeviceInformation::AirPods(info)) => {
-                                    info.le_keys.enc_key = hex::encode(key_data);
-                                }
-                                _ => {
-                                    error!(
-                                        "Device information is not AirPods for adding LE encryption key."
-                                    );
-                                }
-                            },
+                            ProximityKeyType::Irk => info.le_keys.irk = hex::encode(key_data),
+                            ProximityKeyType::EncKey => info.le_keys.enc_key = hex::encode(key_data),
                         }
                     }
                 }
