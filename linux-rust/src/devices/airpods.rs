@@ -313,6 +313,17 @@ impl AirPodsDevice {
                     }
                     AACPEvent::ConversationalAwareness(status) => {
                         debug!("Received ConversationalAwareness event: {}", status);
+                        // 1-3 = talking (start / volume lowered), 4/6/7 = ended
+                        let talking = match status {
+                            1..=3 => Some(true),
+                            4 | 6 | 7 => Some(false),
+                            _ => None,
+                        };
+                        if let (Some(talking), Some(handle)) = (talking, &tray_handle) {
+                            handle
+                                .update(|tray: &mut MyTray| tray.in_conversation = talking)
+                                .await;
+                        }
                         let controller = mc_clone.lock().await;
                         controller.handle_conversational_awareness(status).await;
                     }
