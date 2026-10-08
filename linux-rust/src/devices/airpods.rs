@@ -1,5 +1,5 @@
 use crate::bluetooth::aacp::ControlCommandIdentifiers;
-use crate::bluetooth::aacp::{AACPEvent, AACPManager, AirPodsLEKeys, ProximityKeyType};
+use crate::bluetooth::aacp::{AACPEvent, AACPManager, AirPodsLEKeys, EarDetectionStatus, ProximityKeyType};
 use crate::media_controller::MediaController;
 use crate::ui::messages::BluetoothUIMessage;
 use crate::ui::tray::MyTray;
@@ -240,6 +240,15 @@ impl AirPodsDevice {
                             "Received EarDetection event: old_status={:?}, new_status={:?}",
                             old_status, new_status
                         );
+                        if let Some(handle) = &tray_handle {
+                            let in_ear = new_status
+                                .iter()
+                                .filter(|s| matches!(s, EarDetectionStatus::InEar))
+                                .count();
+                            handle
+                                .update(|tray: &mut MyTray| tray.in_ear = Some(in_ear))
+                                .await;
+                        }
                         let controller = mc_clone.lock().await;
                         debug!(
                             "Calling handle_ear_detection with old_status: {:?}, new_status: {:?}",

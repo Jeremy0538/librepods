@@ -24,6 +24,9 @@ pub struct MyTray {
     /// A Conversation Awareness conversation is going on (the AirPods switch the
     /// listening mode by themselves meanwhile); shown as " talking" in the tooltip.
     pub in_conversation: bool,
+    /// Buds in the ears (ear detection), " in-ear:N" in the tooltip: taking one out
+    /// also makes the AirPods switch the listening mode by themselves.
+    pub in_ear: Option<usize>,
     pub allow_off_option: Option<u8>,
     pub command_tx: Option<UnboundedSender<(ControlCommandIdentifiers, Vec<u8>)>>,
     pub ui_tx: Option<UnboundedSender<BluetoothUIMessage>>,
@@ -107,11 +110,12 @@ impl ksni::Tray for MyTray {
             icon_pixmap: vec![],
             title: "Battery Status".to_string(),
             description: format!(
-                "{} {} {}{}",
+                "{} {} {}{}{}",
                 l,
                 r,
                 c,
-                if self.in_conversation { " talking" } else { "" }
+                if self.in_conversation { " talking" } else { "" },
+                self.in_ear.map(|n| format!(" in-ear:{}", n)).unwrap_or_default()
             ),
         }
     }
