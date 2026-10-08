@@ -143,10 +143,11 @@ impl SwitchPolicy {
         if self.was_connected || !o.powered || o.other_audio_connected {
             return NOTHING;
         }
-        // Playback here may be meant for the speakers; and a page to buds in the case can only
-        // time out, holding the paused playback for the whole retry chain.
-        if o.buds != Buds::Out {
-            return Decision { action: Action::None, reason: "the AirPods aren't known to be out of the case" };
+        // A page to buds in the case can only time out, holding the paused playback for the
+        // whole retry chain. As in OmaPods, an unknown state still tries: BLE adverts don't
+        // always arrive (Rust has no lid state, so both buds charging stands in for the case).
+        if o.buds == Buds::InCase {
+            return Decision { action: Action::None, reason: "the AirPods are in the case" };
         }
         Decision { action: Action::Connect, reason: "playback started" }
     }
@@ -224,17 +225,17 @@ mod tests {
         o.stream_playing = true;
         let d = p.update(&o);
         assert_eq!(d.action, Action::None);
-        assert_eq!(d.reason, "the AirPods aren't known to be out of the case");
+        assert_eq!(d.reason, "the AirPods are in the case");
     }
 
     #[test]
-    fn leaves_unknown_buds_alone() {
+    fn tries_when_the_buds_state_is_unknown() {
         let mut p = SwitchPolicy::default();
         let mut o = Observation { buds: Buds::Unknown, ..idle(0, false) };
         p.update(&o);
         o.now_ms = 1000;
         o.stream_playing = true;
-        assert_eq!(p.update(&o).action, Action::None);
+        assert_eq!(p.update(&o).action, Action::Connect);
     }
 
     #[test]
