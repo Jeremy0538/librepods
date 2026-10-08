@@ -142,10 +142,25 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
 
             if matched_airpods_mac.is_some() {
                 let mut events = dev.events().await?;
+                // Only *changes* arrive as events: decode the advert BlueZ already has first,
+                // or a steady state (buds in the ears, nothing changing) is never seen at all.
+                let mut current = dev
+                    .manufacturer_data()
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|d| bluer::DeviceEvent::PropertyChanged(bluer::DeviceProperty::ManufacturerData(d)));
                 let tray_handle_clone = tray_handle.clone();
                 let connecting_macs_clone = Arc::clone(&connecting_macs);
                 tokio::spawn(async move {
-                    while let Some(ev) = events.next().await {
+                    loop {
+                        let ev = match current.take() {
+                            Some(ev) => ev,
+                            None => match events.next().await {
+                                Some(ev) => ev,
+                                None => break,
+                            },
+                        };
                         match ev {
                             bluer::DeviceEvent::PropertyChanged(prop) => {
                                 crate::multidevice::report_seen();
